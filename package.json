@@ -10,6 +10,6 @@
   "dependencies": {
     "node-fetch": "^3.3.2",
     "rss-parser": "^3.13.0",
-    "jsdom": "^22.2.0"
+    "jsdom": "^21.1.0"
   }
 }
