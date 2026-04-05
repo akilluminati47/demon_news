@@ -10,4 +10,6 @@ yarn-error.log
 /data/postedLinks.json
 
 # Environment variables
-.env
+.envnode_modules/
+postedLinks.json
+package-lock.json
