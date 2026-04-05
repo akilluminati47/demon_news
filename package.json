@@ -1,8 +1,9 @@
 {
   "name": "demon_news",
-  "version": "1.5.0",
-  "description": "Discord news bot with persistent storage and auto-prune of old links",
+  "version": "1.5.1",
+  "description": "Discord news bot for Xbox, Microsoft, PC Gamer, PlayStation, N4G, NVIDIA, and AMD news",
   "main": "news-system.js",
+  "type": "module",
   "scripts": {
     "start": "node news-system.js"
   },

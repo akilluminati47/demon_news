@@ -1,82 +1,77 @@
-import fs from 'fs/promises';
-import Parser from 'rss-parser';
-import fetch from 'node-fetch';
+import Discord from "discord.js";
+import Parser from "rss-parser";
+import fetch from "node-fetch";
+import fs from "fs";
 
+const client = new Discord.Client({ intents: [Discord.GatewayIntentBits.Guilds] });
 const parser = new Parser();
-const POSTED_FILE = '/data/postedLinks.json';
-const MAX_AGE_DAYS = 21;
 
-// Ensure /data folder exists and postedLinks.json exists
-async function ensureDataFile() {
-    try {
-        await fs.mkdir('/data', { recursive: true });
-        try {
-            await fs.access(POSTED_FILE);
-        } catch {
-            await fs.writeFile(POSTED_FILE, JSON.stringify([]));
-        }
-    } catch (err) {
-        console.error("Error ensuring data file:", err);
+// Paths & storage
+const STORAGE_FILE = "./postedLinks.json";
+let postedLinks = {};
+if (fs.existsSync(STORAGE_FILE)) {
+  postedLinks = JSON.parse(fs.readFileSync(STORAGE_FILE, "utf-8"));
+}
+
+// RSS feeds with webhooks
+const FEEDS = [
+  { name: "Xbox News", url: "https://news.xbox.com/en-us/feed/", webhook: process.env.XBOX_WEBHOOK },
+  { name: "Microsoft", url: "https://blogs.microsoft.com/feed/", webhook: process.env.MICROSOFT_WEBHOOK },
+  { name: "PC Gamer", url: "https://www.pcgamer.com/rss/", webhook: process.env.PCGAMER_WEBHOOK },
+  { name: "PlayStation Blog", url: "https://blog.playstation.com/feed/", webhook: process.env.PLAYSTATION_WEBHOOK },
+  { name: "NVIDIA", url: "https://blogs.nvidia.com/feed/", webhook: process.env.NVIDIA_WEBHOOK },
+  { name: "AMD", url: "https://community.amd.com/rss.xml", webhook: process.env.AMD_WEBHOOK },
+];
+
+// Remove links older than 21 days
+function pruneOldLinks() {
+  const cutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
+  for (const key in postedLinks) {
+    if (postedLinks[key] < cutoff) delete postedLinks[key];
+  }
+}
+
+// Save storage
+function saveLinks() {
+  fs.writeFileSync(STORAGE_FILE, JSON.stringify(postedLinks, null, 2));
+}
+
+async function fetchAndSend(feed) {
+  if (!feed.webhook) return;
+
+  try {
+    const rss = await parser.parseURL(feed.url);
+    if (!rss.items || rss.items.length === 0) return;
+
+    for (const item of rss.items) {
+      if (postedLinks[item.link]) continue;
+
+      // Send embed if image exists
+      let embedData = { title: item.title, url: item.link };
+      if (item.enclosure?.url) embedData.image = { url: item.enclosure.url };
+      if (item.contentSnippet) embedData.description = item.contentSnippet;
+
+      const discordWebhook = new Discord.WebhookClient({ url: feed.webhook });
+      await discordWebhook.send({ embeds: [embedData] });
+
+      postedLinks[item.link] = Date.now();
     }
+  } catch (err) {
+    console.error(`Feed error (${feed.name}):`, err.message);
+  }
 }
 
-// Load posted links and prune old
-async function loadPostedLinks() {
-    await ensureDataFile();
-    const data = await fs.readFile(POSTED_FILE, 'utf8');
-    let links = JSON.parse(data);
-    const cutoff = Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
-    links = links.filter(l => l.timestamp >= cutoff);
-    return links;
-}
-
-// Save posted links
-async function savePostedLinks(links) {
-    await ensureDataFile();
-    await fs.writeFile(POSTED_FILE, JSON.stringify(links, null, 2));
-}
-
-// Send message to webhook
-async function sendToWebhook(webhookUrl, post) {
-    try {
-        const res = await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: post.title })
-        });
-        if (!res.ok) throw new Error(`Webhook failed: ${res.status}`);
-        console.log(`Posted: ${post.title}`);
-    } catch (err) {
-        console.error(`Webhook error for ${post.source}:`, err.message);
-    }
-}
-
-// Main function
 async function main() {
-    const feeds = [
-        { url: 'https://www.microsoft.com/en-us/rss', source: 'Microsoft News', webhook: process.env.WEBHOOK_MICROSOFT },
-        { url: 'https://www.pcgamer.com/rss/', source: 'PC Gamer', webhook: process.env.WEBHOOK_PCGAMER },
-        { url: 'https://blog.playstation.com/feed/', source: 'PlayStation Blog', webhook: process.env.WEBHOOK_PLAYSTATION }
-        // Add more RSS feeds here
-    ];
-
-    let postedLinks = await loadPostedLinks();
-
-    for (const feedInfo of feeds) {
-        try {
-            const feed = await parser.parseURL(feedInfo.url);
-            for (const item of feed.items) {
-                if (postedLinks.some(l => l.link === item.link)) continue;
-                await sendToWebhook(feedInfo.webhook, { title: item.title, source: feedInfo.source });
-                postedLinks.push({ link: item.link, timestamp: Date.now() });
-            }
-        } catch (err) {
-            console.error(`Feed error (${feedInfo.source}):`, err.message);
-        }
-    }
-
-    await savePostedLinks(postedLinks);
+  pruneOldLinks();
+  for (const feed of FEEDS) await fetchAndSend(feed);
+  saveLinks();
 }
 
-// Run main
-main().catch(console.error);
+// Start bot
+client.once("ready", () => {
+  console.log(`${client.user.tag} is online!`);
+  main(); 
+  setInterval(main, 15 * 60 * 1000); // every 15 minutes
+});
+
+client.login(process.env.DISCORD_TOKEN);
