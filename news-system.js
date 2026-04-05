@@ -1,5 +1,7 @@
-const fs = require("fs");
+const fs = require("fs").promises;
 const Parser = require("rss-parser");
+const fetch = require("node-fetch");
+
 const parser = new Parser({
   customFields: {
     item: ['enclosure', ['media:content', 'url']]
@@ -16,18 +18,28 @@ const IMPORTANT_KEYWORDS = [
 
 const POSTED_FILE = "postedLinks.json";
 let postedLinks = new Set();
-if (fs.existsSync(POSTED_FILE)) {
-  postedLinks = new Set(JSON.parse(fs.readFileSync(POSTED_FILE, "utf-8")));
+
+async function loadPostedLinks() {
+  try {
+    const data = await fs.readFile(POSTED_FILE, "utf-8");
+    postedLinks = new Set(JSON.parse(data));
+  } catch {
+    postedLinks = new Set();
+  }
+}
+
+async function savePostedLinks() {
+  await fs.writeFile(POSTED_FILE, JSON.stringify([...postedLinks], null, 2));
 }
 
 const feeds = [
   { url: "https://news.xbox.com/en-us/feed/", name: "Xbox News", color: 0x107C10 },
   { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
-  { url: "https://pcgamer.com/rss", name: "PC Gamer", color: 0xE60012 },
-  { url: "https://feeds.feedburner.com/psblog", name: "PlayStation Blog", color: 0x003087 },
-  { url: "https://n4g.com/rss/", name: "N4G Gaming News", color: 0xFF4500 },
-  { url: "https://www.nvidia.com/en-us/feed/rss/", name: "NVIDIA News", color: 0x76B900 },
-  { url: "https://www.amd.com/en/rss/news", name: "AMD News", color: 0xED1C24 }
+  { url: "https://www.pcgamer.com/rss/", name: "PC Gamer", color: 0xE60012 },
+  { url: "https://blog.playstation.com/feed/", name: "PlayStation Blog", color: 0x003087 },
+  { url: "https://blogs.nvidia.com/feed/", name: "NVIDIA News", color: 0x76B900 },
+  { url: "https://community.amd.com/rss.xml", name: "AMD News", color: 0xED1C24 }
+  // Removed N4G due to broken XML
 ];
 
 function isImportant(item) {
@@ -39,18 +51,15 @@ async function sendToWebhook(item, sourceName, color) {
   if (postedLinks.has(item.link) || !isImportant(item)) return;
 
   postedLinks.add(item.link);
-  fs.writeFileSync(POSTED_FILE, JSON.stringify([...postedLinks], null, 2));
+  await savePostedLinks();
 
-  // Detect image
-  let imageUrl = null;
-  if (item.enclosure && item.enclosure.url) imageUrl = item.enclosure.url;
-  else if (item['media:content']) imageUrl = item['media:content'];
+  let imageUrl = item.enclosure?.url || item['media:content'];
 
   const embed = {
     title: item.title,
     url: item.link,
     description: item.contentSnippet || "Click to read more.",
-    color: color,
+    color,
     footer: { text: sourceName },
     timestamp: new Date(item.pubDate || Date.now())
   };
@@ -61,10 +70,7 @@ async function sendToWebhook(item, sourceName, color) {
     await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: sourceName,
-        embeds: [embed]
-      })
+      body: JSON.stringify({ username: sourceName, embeds: [embed] })
     });
     console.log(`Posted: ${item.title}`);
   } catch (err) {
@@ -76,13 +82,11 @@ async function checkFeeds() {
   for (const feed of feeds) {
     try {
       const rss = await parser.parseURL(feed.url);
-      const newItems = rss.items
-        .filter(item => !postedLinks.has(item.link) && isImportant(item));
+      const newItems = rss.items.filter(item => !postedLinks.has(item.link) && isImportant(item));
       const toPost = newItems.slice(0, 2);
 
       toPost.forEach((item, index) => {
-        // Stagger posts 5 min apart
-        setTimeout(() => sendToWebhook(item, feed.name, feed.color), index * 300000);
+        setTimeout(() => sendToWebhook(item, feed.name, feed.color), index * 300000); // 5 min stagger
       });
     } catch (err) {
       console.error(`Feed error (${feed.name}):`, err.message);
@@ -90,5 +94,10 @@ async function checkFeeds() {
   }
 }
 
-setInterval(checkFeeds, 1800000); // 30 minutes
-checkFeeds();
+async function startBot() {
+  await loadPostedLinks();
+  await checkFeeds();
+  setInterval(checkFeeds, 1800000); // every 30 minutes
+}
+
+startBot();

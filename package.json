@@ -1,7 +1,7 @@
 {
   "name": "demon_news",
-  "version": "1.2.0",
-  "description": "Discord news bot for Xbox, Microsoft, PC Gamer, PlayStation, N4G, NVIDIA, and AMD news",
+  "version": "1.4.0",
+  "description": "Discord news bot with all verified RSS feeds and photo embeds",
   "main": "news-system.js",
   "scripts": {
     "start": "node news-system.js"
