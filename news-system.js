@@ -1,14 +1,17 @@
 const fs = require("fs").promises;
+const path = require("path");
 const Parser = require("rss-parser");
-const fetch = require("node-fetch");
 
 const parser = new Parser({
-  customFields: {
-    item: ['enclosure', ['media:content', 'url']]
-  }
+  customFields: { item: ['enclosure', ['media:content', 'url']] }
 });
 
+// Fix fetch for Node <18 on Railway
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const POSTED_FILE = "/data/postedLinks.json"; // Railway persistent volume
+const POST_RETENTION_DAYS = 21;
 
 const IMPORTANT_KEYWORDS = [
   "game pass", "release", "launch", "update",
@@ -16,20 +19,28 @@ const IMPORTANT_KEYWORDS = [
   "dlc", "feature"
 ];
 
-const POSTED_FILE = "postedLinks.json";
-let postedLinks = new Set();
+let postedLinks = new Map(); // link -> timestamp
 
 async function loadPostedLinks() {
   try {
     const data = await fs.readFile(POSTED_FILE, "utf-8");
-    postedLinks = new Set(JSON.parse(data));
+    const obj = JSON.parse(data);
+    postedLinks = new Map(obj);
+
+    // Remove old entries
+    const now = Date.now();
+    for (const [link, ts] of postedLinks) {
+      if (now - ts > POST_RETENTION_DAYS * 24 * 60 * 60 * 1000) {
+        postedLinks.delete(link);
+      }
+    }
   } catch {
-    postedLinks = new Set();
+    postedLinks = new Map();
   }
 }
 
 async function savePostedLinks() {
-  await fs.writeFile(POSTED_FILE, JSON.stringify([...postedLinks], null, 2));
+  await fs.writeFile(POSTED_FILE, JSON.stringify([...postedLinks.entries()], null, 2));
 }
 
 const feeds = [
@@ -39,7 +50,6 @@ const feeds = [
   { url: "https://blog.playstation.com/feed/", name: "PlayStation Blog", color: 0x003087 },
   { url: "https://blogs.nvidia.com/feed/", name: "NVIDIA News", color: 0x76B900 },
   { url: "https://community.amd.com/rss.xml", name: "AMD News", color: 0xED1C24 }
-  // Removed N4G due to broken XML
 ];
 
 function isImportant(item) {
@@ -50,7 +60,8 @@ function isImportant(item) {
 async function sendToWebhook(item, sourceName, color) {
   if (postedLinks.has(item.link) || !isImportant(item)) return;
 
-  postedLinks.add(item.link);
+  const now = Date.now();
+  postedLinks.set(item.link, now);
   await savePostedLinks();
 
   let imageUrl = item.enclosure?.url || item['media:content'];
@@ -61,7 +72,7 @@ async function sendToWebhook(item, sourceName, color) {
     description: item.contentSnippet || "Click to read more.",
     color,
     footer: { text: sourceName },
-    timestamp: new Date(item.pubDate || Date.now())
+    timestamp: new Date(item.pubDate || now)
   };
 
   if (imageUrl) embed.image = { url: imageUrl };
@@ -97,7 +108,7 @@ async function checkFeeds() {
 async function startBot() {
   await loadPostedLinks();
   await checkFeeds();
-  setInterval(checkFeeds, 1800000); // every 30 minutes
+  setInterval(checkFeeds, 1800000); // every 30 min
 }
 
 startBot();
