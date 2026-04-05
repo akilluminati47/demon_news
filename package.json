@@ -1,14 +1,13 @@
 {
   "name": "demon_news",
-  "version": "1.5.1",
-  "description": "Discord news bot for Xbox, Microsoft, PC Gamer, PlayStation, N4G, NVIDIA, and AMD news",
+  "version": "1.6.0",
+  "description": "Discord news bot for Xbox, Microsoft, NVIDIA, AMD, PC Gamer, PlayStation",
   "main": "news-system.js",
   "type": "module",
   "scripts": {
     "start": "node news-system.js"
   },
   "dependencies": {
-    "discord.js": "^14.26.2",
     "node-fetch": "^3.3.2",
     "rss-parser": "^3.13.0"
   }
