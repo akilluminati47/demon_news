@@ -2,7 +2,7 @@ const fs = require("fs");
 const Parser = require("rss-parser");
 const parser = new Parser();
 
-const WEBHOOK_URL = "https://discord.com/api/webhooks/1490230920530366574/FoPbpTo_fK0rNMVhdfLKYLUvsiYJ-KtAJ26FHHrX-1hL6yjKqckgAZMtsMgRdYPKVzMJ";
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 const IMPORTANT_KEYWORDS = [
     "game pass", "release", "launch", "update",
@@ -19,10 +19,9 @@ if (fs.existsSync(POSTED_FILE)) {
 const feeds = [
     { url: "https://news.xbox.com/en-us/feed/", name: "Xbox News", color: 0x107C10 },
     { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
-    { url: "https://n4g.com/rss/", name: "N4G Gaming News", color: 0xFF4500 },
-    { url: "https://www.epicbundle.com/feed/", name: "Epic Bundles", color: 0x313131 },
-    { url: "https://www.reddit.com/r/FreeGameFindings/new/.rss", name: "Reddit FreeGameFindings", color: 0xFF4500 },
-    { url: "https://epicgames4free.webnode.page/rss/all.xml", name: "Epic All RSS", color: 0x00FFFF }
+    { url: "https://pcgamer.com/rss", name: "PC Gamer", color: 0xE60012 },
+    { url: "https://feeds.feedburner.com/psblog", name: "PlayStation Blog", color: 0x003087 },
+    { url: "https://n4g.com/rss/", name: "N4G Gaming News", color: 0xFF4500 }
 ];
 
 function isImportant(item) {
@@ -66,9 +65,10 @@ async function checkFeeds() {
             const rss = await parser.parseURL(feed.url);
             const newItems = rss.items
                 .filter(item => !postedLinks.has(item.link) && isImportant(item));
-            const toPost = newItems.slice(0, 2);
+            const toPost = newItems.slice(0, 2); // Max 2 per feed
 
             toPost.forEach((item, index) => {
+                // Stagger by 5 min between each to avoid spamming
                 setTimeout(() => sendToWebhook(item, feed.name, feed.color), index * 300000);
             });
         } catch (err) {
@@ -77,5 +77,5 @@ async function checkFeeds() {
     }
 }
 
-setInterval(checkFeeds, 1800000);
+setInterval(checkFeeds, 1800000); // Every 30 min
 checkFeeds();
