@@ -1,82 +1,82 @@
-// news-system.js
 import fs from "fs";
-import fetch from "node-fetch";
 import Parser from "rss-parser";
+import fetch from "node-fetch";
 
 const parser = new Parser({
   customFields: {
-    item: ["enclosure", ["media:content", "url"]],
-  },
+    item: ['enclosure', ['media:content', 'url']]
+  }
 });
 
-// Get the webhook URL from Railway environment variables
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
-if (!WEBHOOK_URL) throw new Error("WEBHOOK_URL is not set");
+if (!WEBHOOK_URL) {
+  console.error("Error: WEBHOOK_URL not set in environment variables");
+  process.exit(1);
+}
 
-// Keywords to filter important news
 const IMPORTANT_KEYWORDS = [
   "game pass", "release", "launch", "update",
   "new", "announce", "announcement", "exclusive",
-  "dlc", "feature",
+  "dlc", "feature"
 ];
 
-// File for persistent posted links
 const POSTED_FILE = "postedLinks.json";
+let postedLinks = [];
 
-// Load posted links with timestamps
-let postedLinks = {};
 if (fs.existsSync(POSTED_FILE)) {
   try {
     postedLinks = JSON.parse(fs.readFileSync(POSTED_FILE, "utf-8"));
-  } catch {
-    postedLinks = {};
+  } catch (err) {
+    console.error("Error reading postedLinks.json:", err.message);
+    postedLinks = [];
   }
 }
 
-// Clean old links (>21 days)
-const now = Date.now();
-for (const [link, time] of Object.entries(postedLinks)) {
-  if (now - time > 21 * 24 * 60 * 60 * 1000) {
-    delete postedLinks[link];
-  }
-}
+// Remove links older than 21 days
+const TWENTY_ONE_DAYS = 21 * 24 * 60 * 60 * 1000;
+postedLinks = postedLinks.filter(item => Date.now() - item.timestamp < TWENTY_ONE_DAYS);
 
-// RSS feeds
 const feeds = [
   { url: "https://news.xbox.com/en-us/feed/", name: "Xbox News", color: 0x107C10 },
   { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
   { url: "https://www.pcgamer.com/rss", name: "PC Gamer", color: 0xE60012 },
   { url: "https://feeds.feedburner.com/psblog", name: "PlayStation Blog", color: 0x003087 },
-  { url: "https://www.nvidia.com/en-us/feed/rss/", name: "NVIDIA News", color: 0x76B900 },
-  { url: "https://www.amd.com/en/rss/news", name: "AMD News", color: 0xED1C24 },
+  { url: "https://feeds.feedburner.com/nvidiablog", name: "NVIDIA News", color: 0x76B900 },
+  { url: "https://community.amd.com/sdtpp67534/rss/board?board.id=gaming-blogs", name: "AMD News", color: 0xED1C24 },
 ];
 
-// Check if an item is important
 function isImportant(item) {
   const text = (item.title + " " + (item.contentSnippet || "")).toLowerCase();
-  return IMPORTANT_KEYWORDS.some((keyword) => text.includes(keyword));
+  return IMPORTANT_KEYWORDS.some(keyword => text.includes(keyword));
 }
 
-// Send a post to Discord webhook
-async function sendToWebhook(item, sourceName, color) {
-  if (postedLinks[item.link] || !isImportant(item)) return;
+async function savePostedLinks() {
+  try {
+    fs.writeFileSync(POSTED_FILE, JSON.stringify(postedLinks, null, 2));
+  } catch (err) {
+    console.error("Error writing postedLinks.json:", err.message);
+  }
+}
 
-  // Store timestamp
-  postedLinks[item.link] = Date.now();
-  fs.writeFileSync(POSTED_FILE, JSON.stringify(postedLinks, null, 2));
+async function sendToWebhook(item, sourceName, color) {
+  if (postedLinks.find(link => link.url === item.link) || !isImportant(item)) return;
 
   // Detect image
   let imageUrl = null;
   if (item.enclosure && item.enclosure.url) imageUrl = item.enclosure.url;
-  else if (item["media:content"]) imageUrl = item["media:content"];
+  else if (item['media:content']) imageUrl = item['media:content'];
+
+  // Clean title and snippet for malformed HTML entities
+  const title = (item.title || "").replace(/&/g, "&amp;");
+  const snippet = (item.contentSnippet || "Click to read more.").replace(/&/g, "&amp;");
 
   const embed = {
-    title: item.title,
+    title,
     url: item.link,
-    description: item.contentSnippet || "Click to read more.",
-    color: color,
+    description: snippet,
+    color,
     footer: { text: sourceName },
-    timestamp: new Date(item.pubDate || Date.now()),
+    timestamp: new Date(item.pubDate || Date.now())
   };
 
   if (imageUrl) embed.image = { url: imageUrl };
@@ -85,26 +85,28 @@ async function sendToWebhook(item, sourceName, color) {
     await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: sourceName, embeds: [embed] }),
+      body: JSON.stringify({
+        username: sourceName,
+        embeds: [embed]
+      })
     });
     console.log(`Posted: ${item.title}`);
+    postedLinks.push({ url: item.link, timestamp: Date.now() });
+    savePostedLinks();
   } catch (err) {
     console.error(`Webhook error for ${sourceName}:`, err.message);
   }
 }
 
-// Check all feeds
 async function checkFeeds() {
   for (const feed of feeds) {
     try {
       const rss = await parser.parseURL(feed.url);
-      const newItems = rss.items
-        .filter((item) => !postedLinks[item.link] && isImportant(item));
-      const toPost = newItems.slice(0, 2);
+      const newItems = rss.items.filter(item => !postedLinks.find(link => link.url === item.link) && isImportant(item));
+      const toPost = newItems.slice(0, 2); // max 2 posts per feed at a time
 
-      // Stagger posts by 5 minutes
       toPost.forEach((item, index) => {
-        setTimeout(() => sendToWebhook(item, feed.name, feed.color), index * 300000);
+        setTimeout(() => sendToWebhook(item, feed.name, feed.color), index * 300000); // 5 min stagger
       });
     } catch (err) {
       console.error(`Feed error (${feed.name}):`, err.message);
@@ -112,6 +114,5 @@ async function checkFeeds() {
   }
 }
 
-// Run every 30 minutes
-setInterval(checkFeeds, 1800000);
+setInterval(checkFeeds, 1800000); // 30 min interval
 checkFeeds();
