@@ -1,4 +1,11 @@
 {
+  "name": "demon_news",
+  "version": "1.0.0",
+  "description": "Discord news bot for Xbox, Microsoft, Epic, Newegg",
+  "main": "news-system.js",
+  "scripts": {
+    "start": "node news-system.js"
+  },
   "dependencies": {
     "discord.js": "^14.26.2",
     "node-fetch": "^3.3.2",
