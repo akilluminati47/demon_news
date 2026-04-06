@@ -1,7 +1,7 @@
 {
   "name": "demon_news",
-  "version": "2.1.0",
-  "description": "Advanced Discord RSS news bot with smart filtering and image extraction",
+  "version": "2.2.0",
+  "description": "Stable Discord RSS bot with anti-duplicate protection",
   "main": "news-system.js",
   "type": "module",
   "scripts": {

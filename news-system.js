@@ -37,11 +37,14 @@ if (fs.existsSync(POSTED_FILE)) {
   }
 }
 
-// Remove links older than 21 days
+// 🔒 Remove entries older than 21 days
 const cutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
 postedLinks = postedLinks.filter(p => p.timestamp >= cutoff);
 
-// 🌍 GLOBAL RATE LIMITER (1 post every 2 min)
+// 🧠 Prevent reposts on redeploy (ignore old articles)
+const RECENT_WINDOW = 24 * 60 * 60 * 1000; // 24h
+
+// 🌍 Global rate limit
 let lastPostTime = 0;
 const GLOBAL_DELAY = 120000;
 
@@ -58,7 +61,7 @@ function isImportant(item) {
   return IMPORTANT_KEYWORDS.some(k => text.includes(k));
 }
 
-// 🔥 Image extraction
+// Image extraction
 function extractImage(item) {
   if (item.enclosure?.url) return item.enclosure.url;
   if (item.mediaContent?.$?.url) return item.mediaContent.$.url;
@@ -70,7 +73,7 @@ function extractImage(item) {
   return null;
 }
 
-// 🚀 Fallback scrape from article page
+// Fallback OG image
 async function fetchOGImage(url) {
   try {
     const res = await fetch(url, { timeout: 5000 });
@@ -86,7 +89,15 @@ function saveLinks() {
 }
 
 async function sendToWebhook(item, source, color) {
+  if (!item.link) return;
+
+  // 🚫 Duplicate check
   if (postedLinks.some(p => p.url === item.link)) return;
+
+  // 🚫 Ignore old posts (prevents redeploy spam)
+  const pubTime = new Date(item.pubDate || 0).getTime();
+  if (Date.now() - pubTime > RECENT_WINDOW) return;
+
   if (!isImportant(item)) return;
 
   // 🌍 Global rate limiter
@@ -97,9 +108,7 @@ async function sendToWebhook(item, source, color) {
   }
 
   let image = extractImage(item);
-  if (!image) {
-    image = await fetchOGImage(item.link);
-  }
+  if (!image) image = await fetchOGImage(item.link);
 
   const embed = {
     title: item.title,
@@ -131,12 +140,13 @@ async function sendToWebhook(item, source, color) {
     });
 
     saveLinks();
+
   } catch (err) {
     console.error(`Webhook error (${source}):`, err.message);
   }
 }
 
-// ✅ FEEDS (ALL WORKING)
+// ✅ CLEAN, STABLE FEEDS ONLY
 const feeds = [
   { url: "https://news.xbox.com/en-us/feed/", name: "Xbox Wire", color: 0x107C10 },
   { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
@@ -145,9 +155,7 @@ const feeds = [
   { url: "https://www.gameinformer.com/rss.xml", name: "Game Informer", color: 0xFF4500 },
   { url: "https://feeds.feedburner.com/psblog", name: "PlayStation Blog", color: 0x003087 },
   { url: "https://feeds.feedburner.com/nvidiablog", name: "NVIDIA News", color: 0x76B900 },
-  { url: "https://store.steampowered.com/feeds/news.xml", name: "Steam News", color: 0x1b2838 },
-  { url: "https://news.google.com/rss/search?q=AMD+gaming&hl=en-US&gl=US&ceid=US:en", name: "AMD News", color: 0xED1C24 },
-  { url: "https://rss.app/feeds/Newegg.xml", name: "Newegg Deals", color: 0xFF6600 }
+  { url: "https://store.steampowered.com/feeds/news.xml", name: "Steam News", color: 0x1b2838 }
 ];
 
 async function checkFeeds() {
@@ -155,13 +163,13 @@ async function checkFeeds() {
     try {
       const rss = await parser.parseURL(feed.url);
 
-      // 🧠 Sort newest first (top story priority)
       const sorted = rss.items.sort((a, b) =>
         new Date(b.pubDate || 0) - new Date(a.pubDate || 0)
       );
 
       const newItems = sorted.filter(item =>
-        !postedLinks.some(p => p.url === item.link) && isImportant(item)
+        item.link &&
+        !postedLinks.some(p => p.url === item.link)
       );
 
       const toPost = newItems.slice(0, 2);
