@@ -1,7 +1,7 @@
 {
   "name": "demon_news",
-  "version": "2.2.0",
-  "description": "Stable Discord RSS bot with anti-duplicate protection",
+  "version": "2.2.1",
+  "description": "Stable Discord RSS bot with AMD feed and anti-duplicate protection",
   "main": "news-system.js",
   "type": "module",
   "scripts": {

@@ -37,14 +37,14 @@ if (fs.existsSync(POSTED_FILE)) {
   }
 }
 
-// 🔒 Remove entries older than 21 days
+// Cleanup (21 days)
 const cutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
 postedLinks = postedLinks.filter(p => p.timestamp >= cutoff);
 
-// 🧠 Prevent reposts on redeploy (ignore old articles)
-const RECENT_WINDOW = 24 * 60 * 60 * 1000; // 24h
+// Prevent redeploy spam (24h)
+const RECENT_WINDOW = 24 * 60 * 60 * 1000;
 
-// 🌍 Global rate limit
+// Global rate limit
 let lastPostTime = 0;
 const GLOBAL_DELAY = 120000;
 
@@ -91,16 +91,13 @@ function saveLinks() {
 async function sendToWebhook(item, source, color) {
   if (!item.link) return;
 
-  // 🚫 Duplicate check
   if (postedLinks.some(p => p.url === item.link)) return;
 
-  // 🚫 Ignore old posts (prevents redeploy spam)
   const pubTime = new Date(item.pubDate || 0).getTime();
   if (Date.now() - pubTime > RECENT_WINDOW) return;
 
   if (!isImportant(item)) return;
 
-  // 🌍 Global rate limiter
   const now = Date.now();
   if (now - lastPostTime < GLOBAL_DELAY) {
     setTimeout(() => sendToWebhook(item, source, color), GLOBAL_DELAY);
@@ -146,7 +143,7 @@ async function sendToWebhook(item, source, color) {
   }
 }
 
-// ✅ CLEAN, STABLE FEEDS ONLY
+// ✅ FEEDS (clean + AMD restored)
 const feeds = [
   { url: "https://news.xbox.com/en-us/feed/", name: "Xbox Wire", color: 0x107C10 },
   { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
@@ -155,7 +152,10 @@ const feeds = [
   { url: "https://www.gameinformer.com/rss.xml", name: "Game Informer", color: 0xFF4500 },
   { url: "https://feeds.feedburner.com/psblog", name: "PlayStation Blog", color: 0x003087 },
   { url: "https://feeds.feedburner.com/nvidiablog", name: "NVIDIA News", color: 0x76B900 },
-  { url: "https://store.steampowered.com/feeds/news.xml", name: "Steam News", color: 0x1b2838 }
+  { url: "https://store.steampowered.com/feeds/news.xml", name: "Steam News", color: 0x1b2838 },
+
+  // ✅ AMD (safe via Google News)
+  { url: "https://news.google.com/rss/search?q=AMD+gaming&hl=en-US&gl=US&ceid=US:en", name: "AMD News", color: 0xED1C24 }
 ];
 
 async function checkFeeds() {
@@ -186,6 +186,5 @@ async function checkFeeds() {
   }
 }
 
-// Run every 30 minutes
 setInterval(checkFeeds, 1800000);
 checkFeeds();
