@@ -13,11 +13,22 @@ const parser = new Parser({
   }
 });
 
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-if (!WEBHOOK_URL) {
-  console.error("WEBHOOK_URL not set");
+// ── Webhook slots ──────────────────────────────────────────────────────────────
+const WEBHOOK_URLS = [
+  process.env.WEBHOOK_URL,    // slot 1 (original)
+  process.env.WEBHOOK_URL_2,  // slot 2
+  process.env.WEBHOOK_URL_3,  // slot 3
+  process.env.WEBHOOK_URL_4,  // slot 4
+  process.env.WEBHOOK_URL_5,  // slot 5
+  process.env.WEBHOOK_URL_6,  // slot 6
+].filter(Boolean); // ignore any slots left unset
+
+if (WEBHOOK_URLS.length === 0) {
+  console.error("No WEBHOOK_URLs set — define at least WEBHOOK_URL");
   process.exit(1);
 }
+
+console.log(`Loaded ${WEBHOOK_URLS.length} webhook slot(s)`);
 
 const IMPORTANT_KEYWORDS = [
   "game pass","release","launch","update",
@@ -32,6 +43,10 @@ let postedLinks = [];
 if (fs.existsSync(POSTED_FILE)) {
   try {
     postedLinks = JSON.parse(fs.readFileSync(POSTED_FILE, "utf-8"));
+    // Handle legacy format (plain string array)
+    if (typeof postedLinks[0] === "string") {
+      postedLinks = postedLinks.map(url => ({ url, timestamp: Date.now() }));
+    }
   } catch {
     postedLinks = [];
   }
@@ -44,8 +59,8 @@ postedLinks = postedLinks.filter(p => p.timestamp >= cutoff);
 // Prevent redeploy spam (24h)
 const RECENT_WINDOW = 24 * 60 * 60 * 1000;
 
-// Global rate limit
-let lastPostTime = 0;
+// Per-webhook rate limiting
+const lastPostTime = new Array(WEBHOOK_URLS.length).fill(0);
 const GLOBAL_DELAY = 120000;
 
 // Clean description
@@ -88,6 +103,9 @@ function saveLinks() {
   fs.writeFileSync(POSTED_FILE, JSON.stringify(postedLinks, null, 2));
 }
 
+// Round-robin index
+let webhookIndex = 0;
+
 async function sendToWebhook(item, source, color) {
   if (!item.link) return;
 
@@ -98,8 +116,12 @@ async function sendToWebhook(item, source, color) {
 
   if (!isImportant(item)) return;
 
+  // Pick next available webhook slot (round-robin)
+  const slotIndex = webhookIndex % WEBHOOK_URLS.length;
+  webhookIndex++;
+
   const now = Date.now();
-  if (now - lastPostTime < GLOBAL_DELAY) {
+  if (now - lastPostTime[slotIndex] < GLOBAL_DELAY) {
     setTimeout(() => sendToWebhook(item, source, color), GLOBAL_DELAY);
     return;
   }
@@ -119,7 +141,7 @@ async function sendToWebhook(item, source, color) {
   if (image) embed.image = { url: image };
 
   try {
-    await fetch(WEBHOOK_URL, {
+    await fetch(WEBHOOK_URLS[slotIndex], {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -128,8 +150,8 @@ async function sendToWebhook(item, source, color) {
       })
     });
 
-    console.log(`Posted: ${item.title}`);
-    lastPostTime = Date.now();
+    console.log(`Posted to slot ${slotIndex + 1}: ${item.title}`);
+    lastPostTime[slotIndex] = Date.now();
 
     postedLinks.push({
       url: item.link,
@@ -139,11 +161,10 @@ async function sendToWebhook(item, source, color) {
     saveLinks();
 
   } catch (err) {
-    console.error(`Webhook error (${source}):`, err.message);
+    console.error(`Webhook error slot ${slotIndex + 1} (${source}):`, err.message);
   }
 }
 
-// ✅ FEEDS (clean + AMD restored)
 const feeds = [
   { url: "https://news.xbox.com/en-us/feed/", name: "Xbox Wire", color: 0x107C10 },
   { url: "https://blogs.microsoft.com/feed/", name: "Microsoft News", color: 0x00A4EF },
