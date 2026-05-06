@@ -103,9 +103,6 @@ function saveLinks() {
   fs.writeFileSync(POSTED_FILE, JSON.stringify(postedLinks, null, 2));
 }
 
-// Round-robin index
-let webhookIndex = 0;
-
 async function sendToWebhook(item, source, color) {
   if (!item.link) return;
 
@@ -116,12 +113,10 @@ async function sendToWebhook(item, source, color) {
 
   if (!isImportant(item)) return;
 
-  // Pick next available webhook slot (round-robin)
-  const slotIndex = webhookIndex % WEBHOOK_URLS.length;
-  webhookIndex++;
-
+  // Rate limit check — use the most recent post time across all slots
   const now = Date.now();
-  if (now - lastPostTime[slotIndex] < GLOBAL_DELAY) {
+  const mostRecent = Math.max(...lastPostTime);
+  if (now - mostRecent < GLOBAL_DELAY) {
     setTimeout(() => sendToWebhook(item, source, color), GLOBAL_DELAY);
     return;
   }
@@ -140,28 +135,33 @@ async function sendToWebhook(item, source, color) {
 
   if (image) embed.image = { url: image };
 
-  try {
-    await fetch(WEBHOOK_URLS[slotIndex], {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: source,
-        embeds: [embed]
+  const payload = JSON.stringify({ username: source, embeds: [embed] });
+
+  // Broadcast to all slots simultaneously
+  const results = await Promise.allSettled(
+    WEBHOOK_URLS.map((url, i) =>
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload
+      }).then(() => {
+        lastPostTime[i] = Date.now();
+        console.log(`Posted to slot ${i + 1}: ${item.title}`);
       })
+    )
+  );
+
+  const anyFailed = results.some(r => r.status === "rejected");
+  if (anyFailed) {
+    results.forEach((r, i) => {
+      if (r.status === "rejected") console.error(`Webhook error slot ${i + 1} (${source}):`, r.reason?.message);
     });
+  }
 
-    console.log(`Posted to slot ${slotIndex + 1}: ${item.title}`);
-    lastPostTime[slotIndex] = Date.now();
-
-    postedLinks.push({
-      url: item.link,
-      timestamp: Date.now()
-    });
-
+  // Only mark as posted if at least one slot succeeded
+  if (results.some(r => r.status === "fulfilled")) {
+    postedLinks.push({ url: item.link, timestamp: Date.now() });
     saveLinks();
-
-  } catch (err) {
-    console.error(`Webhook error slot ${slotIndex + 1} (${source}):`, err.message);
   }
 }
 
